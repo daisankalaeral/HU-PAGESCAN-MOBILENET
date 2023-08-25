@@ -1,7 +1,9 @@
 import torch
 import numpy as np
+import torch.nn.functional as F
+import lightning as pl
 
-class HU_PageScan(torch.nn.Module):
+class HU_PageScan(pl.LightningModule):
     def __init__(self, encoder_bloc_n = 5, decoder_bloc_n = 4):
         super().__init__()
         
@@ -19,20 +21,24 @@ class HU_PageScan(torch.nn.Module):
             input_channels = decoder_layer.layer[0].in_channels
             output_channels = decoder_layer.layer[0].out_channels
             channels_stuff.append((input_channels, output_channels))
-        
-        self.final_conv = torch.nn.Conv2d(channels_stuff[-1][1], 1, kernel_size=1, stride=1)
 
         for stuff in channels_stuff[1:]:
             self.up_conv.append(torch.nn.ConvTranspose2d(stuff[0], stuff[1], kernel_size=2, stride=2, padding=0, output_padding=0, groups=2))
         
-    def forward(self,  input):
-        x = input
+        self.final_conv = torch.nn.Conv2d(channels_stuff[-1][1], 1, kernel_size=1, stride=1)
+        
+        self.sigmoid = torch.nn.Sigmoid()
+    
+    def _common_step(self, image):
+        # print(image.shape)
+        x = image
         temp = False
         residual = []
         for encoder_layer in self.encoder:
             x = encoder_layer(x)
             saved_x = x
             x = self.max_pool(x)
+            # print(x.shape)
             residual.append(saved_x)
         
         x = self.middle(x)
@@ -40,10 +46,74 @@ class HU_PageScan(torch.nn.Module):
             x = self.up_conv[i](x)
             x = torch.concat((x, residual.pop()), 1)
             x = decoder_layer(x)
+            # print(x.shape)
 
-        x = self.final_conv(x)
+        output = self.final_conv(x)
+        output = self.sigmoid(output)
+        # print(output.shape)
 
-        return x
+        return output
+
+    def forward(self,  image):
+        return self._common_step(image)
+
+    def training_step(self, batch, batch_idx):
+        image, mask = batch
+
+        y_pred = self._common_step(image)
+
+        loss = dice_coef_loss(y_pred, mask)
+
+        self.log_dict(
+            {
+                "train_loss": loss
+            },
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        image, mask = batch
+
+        y_pred = self._common_step(image)
+
+        loss = dice_coef_loss(y_pred, mask)
+
+        self.log_dict(
+            {
+                "valid_loss": loss
+            },
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        return loss
+    
+    def test_step(self, batch, batch_idx):
+        image, mask = batch
+
+        y_pred = self._common_step(image)
+
+        loss = dice_coef_loss(y_pred, mask)
+
+        self.log_dict(
+            {
+                "test_loss": loss
+            },
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        return loss
+    
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr = 1e-4)
+        return [optimizer]
 
     def make_up_conv_layers(self):
         for decoder_layer in self.decoder:
@@ -83,12 +153,11 @@ class decoder_block(torch.nn.Module):
         output = self.layer(input)
         return output
 
-model = HU_PageScan(5,4)
-torch.save(model.state_dict(), "test.pth")
-# x = torch.rand((1,1,512,512))
-# print(model(x))
+def dice_coef(y_true, y_pred, smooth=1000.0):
+    y_true_f = torch.flatten(y_true)
+    y_pred_f = torch.flatten(y_pred)
+    intersection = torch.sum(y_true_f * y_pred_f)
+    return (2. * intersection + smooth) / (torch.sum(y_true_f) + torch.sum(y_pred_f) + smooth)
 
-# model.eval()
-# model_parameters = filter(lambda p: p.requires_grad, model.parameters())
-# params = sum([np.prod(p.size()) for p in model_parameters])
-# print(params)
+def dice_coef_loss(y_true, y_pred):
+    return -dice_coef(y_true, y_pred)

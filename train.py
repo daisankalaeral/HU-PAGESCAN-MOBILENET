@@ -23,15 +23,17 @@ if __name__ == "__main__":
     )
 
     model = HU_PageScan(4,3)
+    # model.load_from_checkpoint("checkpoints/lightning_logs/version_3/checkpoints/epoch=29-step=13650.ckpt")
+    
     dm = DocDataModule(
         json_path="SmartDocExtended.json",
         data_dir="SmartDocExtended",
         batch_size=32,
         num_workers=4
     )
-
-    trainer.fit(model, dm)
+    
+    trainer.fit(model, dm, ckpt_path="checkpoints/lightning_logs/version_27/checkpoints/epoch=29-step=13650.ckpt")
     # trainer.validate(model, dm)
-    # trainer.test(model, dm)
+    # trainer.test(model, dm, ckpt_path="checkpoints/lightning_logs/version_3/checkpoints/epoch=29-step=13650.ckpt")
 
 

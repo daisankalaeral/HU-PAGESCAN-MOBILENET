@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 import lightning as pl
 import cv2 as cv
+from tqdm import tqdm
 import json
 
 def json_load(path):
@@ -20,7 +21,6 @@ class DocDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.json_data = json_load(json_path)
-        print(len(self.json_data))
         self.data_dir = data_dir
     
     def setup(self, stage):
@@ -28,15 +28,17 @@ class DocDataModule(pl.LightningDataModule):
         
         n_train_samples = round(n_samples*0.8)
         n_valid_test_samples = n_samples - n_train_samples
-        n_valid_samples = round(n_valid_test_samples*0.8)
+        n_valid_samples = round(n_valid_test_samples*0.5)
         n_test_samples = n_valid_test_samples - n_valid_samples
-
-        self.train_list, valid_test_list = random_split(self.json_data, [n_train_samples, n_valid_test_samples])
-        self.valid_list, self.test_list = random_split(valid_test_list, [n_valid_samples, n_test_samples])
+        
+        entire_dataset = DocDataset(self.json_data, self.data_dir)
+        
+        self.train_dataset, valid_test_dataset = random_split(entire_dataset, [n_train_samples, n_valid_test_samples])
+        self.valid_dataset, self.test_dataset = random_split(valid_test_dataset, [n_valid_samples, n_test_samples])
 
     def train_dataloader(self):
         return DataLoader(
-            DocDataset(self.train_list, self.data_dir),
+            self.train_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=True
@@ -44,7 +46,7 @@ class DocDataModule(pl.LightningDataModule):
     
     def val_dataloader(self):
         return DataLoader(
-            DocDataset(self.valid_list, self.data_dir),
+            self.valid_dataset,
             batch_size=1,
             num_workers=self.num_workers,
             shuffle=False
@@ -52,28 +54,39 @@ class DocDataModule(pl.LightningDataModule):
     
     def test_dataloader(self):
         return DataLoader(
-            DocDataset(self.test_list, self.data_dir),
+            self.test_dataset,
             batch_size=1,
             num_workers=self.num_workers,
             shuffle=False
         )
 
 class DocDataset(Dataset):
-    def __init__(self, data_list, data_dir):
+    def __init__(self, data, data_dir, load_into_ram = True):
         super().__init__()
 
-        self.data_list = data_list
+        self.data = data
         self.data_dir = data_dir
+        self.load_into_ram = load_into_ram
+        if self.load_into_ram:
+            self.new_data = self.load_data_into_ram(self.data, "Loading data") 
     
     def __len__(self):
-        return len(self.data_list)
+        return len(self.data)
     
     def __getitem__(self, index):
-        image = self.load_image(self.data_list[index]['image_path'])
-        mask = self.load_image(self.data_list[index]['mask_path'])
-        
-        return image, mask
-        
+        # image = self.load_image(self.data_list[index]['image_path'])
+        # mask = self.load_image(self.data_list[index]['mask_path'])
+        if self.load_into_ram:
+            return self.new_data[index]
+        return self.data[index]
+    
+    def load_data_into_ram(self, data_list, ms):
+        temp = []
+        print(ms)
+        for sample in tqdm(data_list):
+            temp.append((self.load_image(sample['image_path']), self.load_image(sample['mask_path'])))
+        return temp
+    
     def load_image(self, path):
         path = self.data_dir +"/"+ path
         image = cv.imread(path)

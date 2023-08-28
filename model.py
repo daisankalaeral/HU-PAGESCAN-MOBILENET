@@ -1,11 +1,14 @@
 import torch
 import numpy as np
 import torch.nn.functional as F
+from torchvision.utils import save_image
 import lightning as pl
+import cv2 as cv
 
 class HU_PageScan(pl.LightningModule):
     def __init__(self, encoder_bloc_n = 5, decoder_bloc_n = 4):
         super().__init__()
+        self.test_image_id = 0
         
         self.max_pool = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
@@ -68,7 +71,7 @@ class HU_PageScan(pl.LightningModule):
             {
                 "train_loss": loss
             },
-            on_step=False,
+            on_step=True,
             on_epoch=True,
             prog_bar=True,
         )
@@ -86,7 +89,7 @@ class HU_PageScan(pl.LightningModule):
             {
                 "valid_loss": loss
             },
-            on_step=False,
+            on_step=True,
             on_epoch=True,
             prog_bar=True,
         )
@@ -104,10 +107,18 @@ class HU_PageScan(pl.LightningModule):
             {
                 "test_loss": loss
             },
-            on_step=False,
+            on_step=True,
             on_epoch=True,
             prog_bar=True,
         )
+        
+        haha = y_pred
+        haha = haha.cpu()
+        haha = haha.type(torch.float32)
+        # haha = cv.cvtColor(haha, cv.COLOR_BGR2GRAY)
+        save_image(mask.cpu(), f"/notebooks/{self.test_image_id}_gd.png")
+        save_image(haha, f"/notebooks/{self.test_image_id}_hat.png")
+        self.test_image_id += 1
 
         return loss
     
